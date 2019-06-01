@@ -118,6 +118,9 @@ protected:
 	}
 	
 	void removeBlockTargetIfNeeded (id const target, NSSet *allTargets = nil) const {
+		if (!target) {
+			return;
+		}
 		NSMutableSet *blockTargets = this->assocciatedActions ();
 		if ([blockTargets containsObject:target] && ![allTargets containsObject:target]) {
 			[blockTargets removeObject:target];
