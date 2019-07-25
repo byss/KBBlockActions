@@ -24,6 +24,7 @@
 #import "UIKit+blockActions.h"
 
 #import <array>
+#import <memory>
 #import <string>
 #import <objc/runtime.h>
 
@@ -62,7 +63,20 @@ private:
 
 template <typename Sender, typename AssociatedActions>
 struct SenderWrapper {
-	SenderWrapper (Sender const self): self (self) {}
+	struct Swizzler {
+		inline void operator () (SEL const selector) const {
+			dispatch_once (&onceToken, ^{
+				SEL const swizzledSelector = sel_getUid ((std::string ("_kb_swizzled_") + sel_getName (selector)).c_str ());
+				Method const originalMethod = class_getInstanceMethod ([Sender class], selector);
+				Method const swizzledMethod = class_getInstanceMethod ([Sender class], swizzledSelector);
+				method_exchangeImplementations (originalMethod, swizzledMethod);
+			});
+		}
+		
+		static dispatch_once_t onceToken;
+	};
+		
+	SenderWrapper (Sender *const self): self (self) {}
 	
 protected:
 	template <typename ...Args>
@@ -95,15 +109,18 @@ protected:
 		objc_setAssociatedObject (self, associationKey, newActions, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	}
 	
-	Sender const self;
+	Sender *const self;
 
 private:
 	static constexpr void const *const associationKey = "actions";
 };
 
+template <typename Sender, typename AssociatedActions>
+dispatch_once_t SenderWrapper <Sender, AssociatedActions>::Swizzler::onceToken;
+
 template <typename Sender>
 struct MultiTargetsSenderWrapper: public SenderWrapper <Sender, NSMutableSet *> {
-	MultiTargetsSenderWrapper (Sender const self): SenderWrapper <Sender, NSMutableSet *> (self) {}
+	MultiTargetsSenderWrapper (Sender *const self): SenderWrapper <Sender, NSMutableSet *> (self) {}
 	
 protected:
 	void storeBlockTarget (CF_CONSUMED id const target) const {
@@ -128,11 +145,13 @@ protected:
 	}
 };
 
-struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem *, id> {
+struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem, id> {
 	UIBarButtonItemWrapper (UIBarButtonItem *self): SenderWrapper (self) {}
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler) const {
+		Swizzler () (@selector (setTarget:));
+		
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			this->setAssocciatedActions (target);
 			[target release];
@@ -151,12 +170,6 @@ struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem *, id> {
 };
 
 @implementation UIBarButtonItem (blockAction)
-
-+ (void) load {
-	Method const originalMethod = class_getInstanceMethod (self, @selector (setTarget:));
-	Method const swizzledMethod = class_getInstanceMethod (self, @selector (_kb_swizzled_setTarget:));
-	method_exchangeImplementations (originalMethod, swizzledMethod);
-}
 
 - (instancetype) initWithImage: (UIImage *__nullable) image style: (UIBarButtonItemStyle) style blockTargetHandler: (void (^__unsafe_unretained) (void)) handler {
 	if (self = [self initWithImage:image style:style target:nil action:NULL]) {
@@ -199,11 +212,13 @@ struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem *, id> {
 @end
 
 
-struct UIControlWrapper: public MultiTargetsSenderWrapper <UIControl *> {
+struct UIControlWrapper: public MultiTargetsSenderWrapper <UIControl> {
 	UIControlWrapper (UIControl *self): MultiTargetsSenderWrapper (self) {}
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler, UIControlEvents controlEvents) const {
+		Swizzler () (@selector (removeTarget:action:forControlEvents:));
+
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			[self addTarget:target action:selector forControlEvents:controlEvents];
 			this->storeBlockTarget (target);
@@ -216,12 +231,6 @@ struct UIControlWrapper: public MultiTargetsSenderWrapper <UIControl *> {
 };
 
 @implementation UIControl (blockActions)
-
-+ (void) load {
-	Method const originalMethod = class_getInstanceMethod (self, @selector (removeTarget:action:forControlEvents:));
-	Method const swizzledMethod = class_getInstanceMethod (self, @selector (_kb_swizzled_removeTarget:action:forControlEvents:));
-	method_exchangeImplementations (originalMethod, swizzledMethod);
-}
 
 - (id <NSObject>) addBlockTargetForControlEvents: (UIControlEvents) controlEvents handler: (void (^__unsafe_unretained)(void)) handler {
 	return UIControlWrapper (self).addTarget (handler, std::move (controlEvents));
@@ -242,11 +251,13 @@ struct UIControlWrapper: public MultiTargetsSenderWrapper <UIControl *> {
 
 @end
 
-struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRecognizer *> {
+struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRecognizer> {
 	UIGestureRecognizerWrapper (UIGestureRecognizer *self): MultiTargetsSenderWrapper (self) {}
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler) const {
+		Swizzler () (@selector (removeTarget:action:));
+
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			[self addTarget:target action:selector];
 			this->storeBlockTarget (target);
@@ -259,12 +270,6 @@ struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRe
 };
 
 @implementation UIGestureRecognizer (blockActions)
-
-+ (void) load {
-	Method const originalMethod = class_getInstanceMethod (self, @selector (removeTarget:action:));
-	Method const swizzledMethod = class_getInstanceMethod (self, @selector (_kb_swizzled_removeTarget:action:));
-	method_exchangeImplementations (originalMethod, swizzledMethod);
-}
 
 - (instancetype) initWithBlockTargetHandler: (void (^__unsafe_unretained) (void)) handler {
 	if (self = [self init]) {
@@ -291,3 +296,11 @@ struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRe
 }
 
 @end
+
+__attribute__((constructor)) void __load__ (void);
+
+__attribute__((constructor)) void __load__ (void) {
+	SenderWrapper <UIBarButtonItem, id>::Swizzler::onceToken = 0;
+	SenderWrapper <UIControl, NSMutableSet *>::Swizzler::onceToken = 0;
+	SenderWrapper <UIGestureRecognizer, NSMutableSet *>::Swizzler::onceToken = 0;
+}
