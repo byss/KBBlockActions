@@ -154,7 +154,6 @@ struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem, id> {
 		
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			this->setAssocciatedActions (target);
-			[target release];
 			
 			self.target = target;
 			self.action = selector;
