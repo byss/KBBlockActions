@@ -26,14 +26,17 @@ import UIKit
 public protocol UIBarButtonItemBlockTargetProtocol {}
 
 extension UIBarButtonItemBlockTargetProtocol where Self: UIBarButtonItem {
+	@discardableResult
 	public func setBlockTarget (handler: @escaping () -> ()) -> NSObjectProtocol {
 		return self.__setBlockTargetWithHandler (handler);
 	}
 
+	@discardableResult
 	public func setBlockTarget (handler: @escaping (Self) -> ()) -> NSObjectProtocol {
 		return self.__setBlockTargetWithHandlerWithSender (Self.convertingHandler (handler));
 	}
 
+	@discardableResult
 	public func setBlockTarget (handler: @escaping (Self, UIEvent) -> ()) -> NSObjectProtocol {
 		return self.__setBlockTargetWithHandlerWithEvent (Self.convertingHandler (handler));
 	}

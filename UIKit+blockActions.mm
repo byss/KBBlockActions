@@ -63,25 +63,21 @@ private:
 
 template <typename Sender, typename AssociatedActions>
 struct SenderWrapper {
-	struct Swizzler {
-		inline void operator () (SEL const selector) const {
-			dispatch_once (&onceToken, ^{
-				SEL const swizzledSelector = sel_getUid ((std::string ("_kb_swizzled_") + sel_getName (selector)).c_str ());
-				Method const originalMethod = class_getInstanceMethod ([Sender class], selector);
-				Method const swizzledMethod = class_getInstanceMethod ([Sender class], swizzledSelector);
-				method_exchangeImplementations (originalMethod, swizzledMethod);
-			});
-		}
-		
-		static dispatch_once_t onceToken;
-	};
-		
 	SenderWrapper (Sender *const self): self (self) {}
 	
 protected:
 	template <typename ...Args>
 	using BlockType = void (^) (Args...);
 
+	struct Swizzler {
+		inline Swizzler (SEL const selector) {
+			SEL const swizzledSelector = sel_getUid ((std::string ("_kb_swizzled_") + sel_getName (selector)).c_str ());
+			Method const originalMethod = class_getInstanceMethod ([Sender class], selector);
+			Method const swizzledMethod = class_getInstanceMethod ([Sender class], swizzledSelector);
+			method_exchangeImplementations (originalMethod, swizzledMethod);
+		}
+	};
+	
 	template <typename ...Args>
 	id <NSObject> makeBlockTarget (BlockType <Args...> __unsafe_unretained handler, std::function <void (id const target, SEL const selector)> resultHandler) const {
 		using Invocation = HandlerInvocation <BlockType <Args...>>;
@@ -115,9 +111,6 @@ private:
 	static constexpr void const *const associationKey = "actions";
 };
 
-template <typename Sender, typename AssociatedActions>
-dispatch_once_t SenderWrapper <Sender, AssociatedActions>::Swizzler::onceToken;
-
 template <typename Sender>
 struct MultiTargetsSenderWrapper: public SenderWrapper <Sender, NSMutableSet *> {
 	MultiTargetsSenderWrapper (Sender *const self): SenderWrapper <Sender, NSMutableSet *> (self) {}
@@ -150,7 +143,7 @@ struct UIBarButtonItemWrapper: public SenderWrapper <UIBarButtonItem, id> {
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler) const {
-		Swizzler () (@selector (setTarget:));
+		static auto const __used swizzler = Swizzler (@selector (setTarget:));
 		
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			this->setAssocciatedActions (target);
@@ -216,7 +209,7 @@ struct UIControlWrapper: public MultiTargetsSenderWrapper <UIControl> {
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler, UIControlEvents controlEvents) const {
-		Swizzler () (@selector (removeTarget:action:forControlEvents:));
+		static auto const __used swizzler = Swizzler (@selector (removeTarget:action:forControlEvents:));
 
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			[self addTarget:target action:selector forControlEvents:controlEvents];
@@ -255,7 +248,7 @@ struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRe
 	
 	template <typename ...Args>
 	id <NSObject> addTarget (BlockType <Args...> __unsafe_unretained handler) const {
-		Swizzler () (@selector (removeTarget:action:));
+		static auto const __used swizzler = Swizzler (@selector (removeTarget:action:));
 
 		return this->makeBlockTarget (handler, [&] (id const target, SEL const selector) {
 			[self addTarget:target action:selector];
@@ -295,11 +288,3 @@ struct UIGestureRecognizerWrapper: public MultiTargetsSenderWrapper <UIGestureRe
 }
 
 @end
-
-__attribute__((constructor)) void __load__ (void);
-
-__attribute__((constructor)) void __load__ (void) {
-	SenderWrapper <UIBarButtonItem, id>::Swizzler::onceToken = 0;
-	SenderWrapper <UIControl, NSMutableSet *>::Swizzler::onceToken = 0;
-	SenderWrapper <UIGestureRecognizer, NSMutableSet *>::Swizzler::onceToken = 0;
-}
