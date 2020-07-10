@@ -36,14 +36,39 @@ struct HandlerInvocation {
 	}
 };
 
+template <size_t N>
+struct HandlerMethodTypes {
+private:
+	static constexpr auto getValue () {
+		auto const &prevResult = HandlerMethodTypes <N - 1>::value;
+		std::array <char, N + 3> result { };
+		for (size_t i = 0; i < N + 1; i++) {
+			result [i] = prevResult [i];
+		}
+		result [N + 1] = _C_ID;
+		result [N + 2] = '\0';
+		return result;
+	}
+
+public:
+	static std::array <char, N + 3> constexpr value = HandlerMethodTypes::getValue ();
+};
+
+template <>
+struct HandlerMethodTypes <0> {
+public:
+	static std::array <char, 3> constexpr value { _C_ID, _C_SEL, '\0' };
+};
+
 template <typename ...Args>
 struct HandlerMethodInfo {
 	SEL const selector = sel_getUid (selectorName ());
-	char const *const methodTypes = methodTypesArray ().data ();
+	std::array <char, sizeof... (Args) + 3> const &methodTypes = HandlerMethodTypes <sizeof... (Args)>::value;
 
 private:
 	static constexpr auto methodTypesArray () {
 		std::array <char, sizeof... (Args) + 3> result { _C_ID, _C_SEL };
+		
 		for (auto it = result.begin () + 2; it < result.end () - 1; it++) {
 			*it = _C_ID;
 		}
@@ -88,7 +113,7 @@ protected:
 		SEL const selector = methodInfo.selector;
 		if (!class_respondsToSelector (handlerClass, selector)) {
 			void (*invokeImp) (id, SEL, Args...) = &Invocation::invoke;
-			class_addMethod (handlerClass, selector, (IMP) invokeImp, methodInfo.methodTypes);
+			class_addMethod (handlerClass, selector, (IMP) invokeImp, methodInfo.methodTypes.data ());
 		}
 		
 		id const target = (id) _Block_copy (handler);
