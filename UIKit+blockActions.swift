@@ -22,6 +22,7 @@
 //
 
 import UIKit
+import KBBlockActions_ObjC
 
 public protocol UIBarButtonItemBlockTargetProtocol {}
 

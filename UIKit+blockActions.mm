@@ -22,6 +22,7 @@
 //
 
 #import "UIKit+blockActions.h"
+#import "ARCOverride.h"
 
 #import <array>
 #import <memory>
@@ -116,9 +117,9 @@ protected:
 			class_addMethod (handlerClass, selector, (IMP) invokeImp, methodInfo.methodTypes.data ());
 		}
 		
-		id const target = (id) _Block_copy (handler);
+		__unsafe_unretained id const target = kb_block_copy (handler);
 		resultHandler (target, selector);
-		[target release];
+		kb_objc_release (target);
 		return target;
 	}
 	
@@ -148,7 +149,6 @@ protected:
 		} else {
 			blockActions = [[NSMutableSet alloc] initWithObjects:&target count:1];
 			this->setAssocciatedActions (blockActions);
-			[blockActions release];
 		}
 	}
 	
